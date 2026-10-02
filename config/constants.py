@@ -226,17 +226,6 @@ def signup_url_for_country(country: str) -> str:
     return f"https://signup.live.com/signup?lic=1&mkt={mkt}"
 
 
-def signup_url_for_country(country: str) -> str:
-    """Microsoft signup URL with explicit ``mkt`` — avoids Uzbek/随机 IP locale。"""
-    mkt, _lc = locale_for_country(country)
-    return f"https://signup.live.com/signup?lic=1&mkt={mkt}"
-
-
-def signup_url_for_country(country: str) -> str:
-    """Microsoft signup URL with explicit ``mkt`` — avoids Uzbek/随机 IP locale。"""
-    mkt, _lc = locale_for_country(country)
-    return f"https://signup.live.com/signup?lic=1&mkt={mkt}"
-
 # Web 注册页国家下拉（ISO2 → 英文名；未在 COUNTRY_LOCALE 的仍可用默认 EN-US locale）
 REGISTRATION_COUNTRY_NAMES: dict[str, str] = {
     "AE": "United Arab Emirates",

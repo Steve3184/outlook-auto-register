@@ -108,16 +108,6 @@ def register_batch_iter(
     jitter_min: Optional[float] = None,
     jitter_max: Optional[float] = None,
 ) -> Iterator[dict]:
-    px_mode: str = "solver",
-    skip_post_login: bool = False,
-    fetch_mail_token: bool = True,
-    output_dir: Optional[str] = "accounts",
-    batch_id: str = "",
-    batch_no: Optional[int] = None,
-    batch_label: str = "",
-    jitter_min: Optional[float] = None,
-    jitter_max: Optional[float] = None,
-) -> Iterator[dict]:
     """并发注册 count 个账号，yield 进度事件（便于网页 SSE / CLI 消费）。
 
     防封内建：
@@ -199,8 +189,6 @@ def register_batch_iter(
             skip_post_login=skip_post_login,
             fetch_mail_token=fetch_mail_token,
             email_format=email_format,
-        )
-            fetch_mail_token=fetch_mail_token,
         )
         if res.success and output_dir:
             try:

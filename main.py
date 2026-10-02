@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from controller.account_controller import router as account_router
+from controller.auth_controller import router as auth_router
 from controller.database_controller import router as database_router
 from controller.health_controller import router as health_router
 from controller.proxy_controller import router as proxy_router
@@ -23,6 +24,7 @@ from controller.register_controller import router as register_router
 from controller.rescue_controller import router as rescue_router
 from controller.settings_controller import router as settings_router
 from controller.verify_controller import router as verify_router
+from middleware.auth_middleware import AuthMiddleware
 from service.web import runtime as rt
 
 logging.basicConfig(
@@ -48,8 +50,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# WebUI 密码验证中间件
+app.add_middleware(AuthMiddleware)
+
 for _router in (
     health_router,
+    auth_router,
     settings_router,
     register_router,
     account_router,

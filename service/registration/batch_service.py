@@ -99,6 +99,17 @@ def register_batch_iter(
     proxy_templates: Optional[list[Optional[str]]] = None,
     px_mode: str = "solver",
     skip_post_login: bool = False,
+    fetch_mail_token: bool = False,
+    email_format: str = "alpha",
+    output_dir: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    batch_no: Optional[int] = None,
+    batch_label: Optional[str] = None,
+    jitter_min: Optional[float] = None,
+    jitter_max: Optional[float] = None,
+) -> Iterator[dict]:
+    px_mode: str = "solver",
+    skip_post_login: bool = False,
     fetch_mail_token: bool = True,
     output_dir: Optional[str] = "accounts",
     batch_id: str = "",
@@ -186,6 +197,9 @@ def register_batch_iter(
             ),
             px_mode=px_mode,
             skip_post_login=skip_post_login,
+            fetch_mail_token=fetch_mail_token,
+            email_format=email_format,
+        )
             fetch_mail_token=fetch_mail_token,
         )
         if res.success and output_dir:

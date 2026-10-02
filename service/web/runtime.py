@@ -748,6 +748,7 @@ def _do_register_one(job: Job, i: int, p: dict[str, Any]) -> None:
                 px_mode=p.get("px_mode") or "solver",
                 skip_post_login=bool(p.get("skip_login")),
                 fetch_mail_token=not bool(p.get("no_mail_token")),
+                email_format=p.get("email_format") or "alpha",
             )
         except Exception as exc:  # noqa: BLE001
             job.update_account(i, status="失败", error=str(exc))
@@ -836,6 +837,7 @@ def _run_batch_iter(job: Job, p: dict[str, Any]) -> bool:
         px_mode=p.get("px_mode") or "solver",
         skip_post_login=bool(p.get("skip_login")),
         fetch_mail_token=not bool(p.get("no_mail_token")),
+        email_format=p.get("email_format") or "alpha",
         output_dir=str(ACCOUNTS_DIR),
         batch_id=job.id,
         batch_no=job.batch_no,

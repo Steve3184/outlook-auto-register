@@ -32,6 +32,8 @@ class RegisterRequest(BaseModel):
     execution_route: str = "protocol"
     roxy_profile_id: Optional[str] = None
     bitbrowser_profile_id: Optional[str] = None
+    # 邮箱名称格式：alpha（纯字母）、alphanum（字母数字混合）、alphanum_dense（数字密集型）
+    email_format: str = "alpha"
 
 
 

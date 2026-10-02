@@ -65,6 +65,7 @@ def _register_attempt(
     px_mode: str,
     skip_post_login: bool,
     fetch_mail_token: bool,
+    email_format: str = "alpha",
 ) -> RegisterResult:
     http = OutlookHttpSession(proxy=proxy)
 
@@ -96,12 +97,31 @@ def _register_attempt(
         ctx = _stage("bootstrap", lambda: bootstrap_session(http, mkt=mkt, lc=lc))
         _stage("px_preload", lambda: preload_perimeterx(http, ctx))
 
-    prefix = email_prefix or _random_email_prefix()
+    prefix = email_prefix or _random_email_prefix(format_style=email_format)
     first, last = _random_name()
     password = _random_password()
     birth_date = _random_birthday()
 
     if flow == "z_style":
+        # Match the reference order: initialize risk and obtain silent PX before
+        # checking the mailbox name. The account signature is submitted only
+        # after a concrete available name has been selected.
+        silent_px = _stage(
+            "risk_initialize_experiments_silent",
+            lambda: prepare_z_style_silent(
+                http,
+                ctx,
+                mode=px_mode,
+                proxy=proxy,
+                country=country,
+            ),
+        )
+        email, check_map = _stage(
+            "pick_email",
+            lambda: _pick_available_email(
+                http, ctx, prefix, domain=email_domain, email_format=email_format,
+            ),
+        )
         # Match the reference order: initialize risk and obtain silent PX before
         # checking the mailbox name. The account signature is submitted only
         # after a concrete available name has been selected.
@@ -144,7 +164,7 @@ def _register_attempt(
         email, check_map = _stage(
             "pick_email",
             lambda: _pick_available_email(
-                http, ctx, prefix, domain=email_domain,
+                http, ctx, prefix, domain=email_domain, email_format=email_format,
             ),
         )
         logger.info("选用邮箱: %s", email)
@@ -247,10 +267,61 @@ def _register_attempt(
     ))
 
 
-def _random_email_prefix(length: int = 0) -> str:
-    # 对齐卖家风格：纯小写字母、无数字、10-12 位（带数字/年份最像脚本，去掉）。
+def _random_email_prefix(length: int = 0, format_style: str = "alpha") -> str:
+    """
+    生成随机邮箱前缀。
+
+    Args:
+        length: 前缀长度，0表示随机10-12位（仅在使用预设格式时有效）
+        format_style: 格式风格
+            - "alpha": 纯小写字母（默认，对齐卖家风格）
+            - "alphanum": 字母数字混合，随机位置
+            - "alphanum_dense": 数字密集型，接近交替
+            - 自定义模板：使用 'a' 表示字母，'1'或'#' 表示数字
+              例如："a1a11aaaaaaaa" 生成类似 x3y45zzzzzzzz 的格式
+    """
+    # 检查是否为自定义模板格式（包含 'a' 和数字/# 字符）
+    if any(c in format_style for c in ['a', '1', '#']):
+        # 自定义模板模式
+        result = []
+        for char in format_style:
+            if char == 'a' or char == 'A':
+                result.append(random.choice(string.ascii_lowercase))
+            elif char in '0123456789#':
+                result.append(random.choice(string.digits))
+            else:
+                # 其他字符直接保留（支持固定字符）
+                result.append(char.lower())
+        return "".join(result)
+
+    # 预设格式
     n = length or random.randint(10, 12)
-    return "".join(random.choice(string.ascii_lowercase) for _ in range(n))
+
+    if format_style == "alphanum":
+        # 字母数字混合：随机位置插入数字，数字占比约20-30%
+        result = []
+        num_digits = random.randint(max(2, n // 5), max(3, n // 3))
+        digit_positions = set(random.sample(range(n), num_digits))
+        for i in range(n):
+            if i in digit_positions:
+                result.append(random.choice(string.digits))
+            else:
+                result.append(random.choice(string.ascii_lowercase))
+        return "".join(result)
+
+    elif format_style == "alphanum_dense":
+        # 数字密集型：字母数字交替或接近交替
+        result = []
+        for i in range(n):
+            if i % 2 == 1 and random.random() < 0.7:
+                result.append(random.choice(string.digits))
+            else:
+                result.append(random.choice(string.ascii_lowercase))
+        return "".join(result)
+
+    else:  # "alpha" 或其他
+        # 纯小写字母（默认）
+        return "".join(random.choice(string.ascii_lowercase) for _ in range(n))
 
 
 def _random_password(length: int = 0) -> str:
@@ -314,6 +385,7 @@ def _pick_available_email(
     *,
     domain: str = "@outlook.com",
     max_tries: int = 6,
+    email_format: str = "alpha",
 ) -> tuple[str, list[str]]:
     # 对齐卖家：只用纯小写字母前缀，不再退化成 prefix+数字 / prefix+年份。
     # 10-12 位随机字母几乎不会撞名；撞了就换一个新的纯字母前缀，而不是加数字。
@@ -321,7 +393,7 @@ def _pick_available_email(
     tried: set[str] = set()
 
     def _next_prefix(first: bool) -> str:
-        return prefix if first else _random_email_prefix()
+        return prefix if first else _random_email_prefix(format_style=email_format)
 
     for i in range(max_tries):
         p = _next_prefix(i == 0)
@@ -357,6 +429,7 @@ def register_one(
     px_mode: str = "solver",
     skip_post_login: bool = False,
     fetch_mail_token: bool = False,
+    email_format: str = "alpha",
 ) -> RegisterResult:
     explicit_proxy = proxy or os.environ.get("HTTP_PROXY") or None
     retries = max(1, int((os.environ.get("REG_PROXY_RETRIES") or "3").strip() or "3"))
@@ -406,6 +479,7 @@ def register_one(
                 px_mode=px_mode,
                 skip_post_login=skip_post_login,
                 fetch_mail_token=fetch_mail_token,
+                email_format=email_format,
             )
         except Exception as exc:
             last_exc = exc

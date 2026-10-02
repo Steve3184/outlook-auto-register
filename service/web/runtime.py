@@ -998,6 +998,18 @@ def _run_real(job: Job) -> None:
     provider, px_mode, provider_label = _apply_captcha_runtime(p)
     job.push_log("INFO", f"打码平台: {provider_label}（px_mode={px_mode}）")
 
+    # 池设置（代理类型/预检超时/sid 轮换）→ 环境变量，引擎线程内 register_one 生效
+    try:
+        rt_env = proxy_pool.apply_runtime_env(force=True)
+        ptype_label = rt_env.get("proxy_type") or "auto(http)"
+        job.push_log(
+            "INFO",
+            f"代理类型: {ptype_label}｜预检超时 {rt_env.get('preflight_timeout')}s｜"
+            f"含 sid 预检失败轮换上限 {rt_env.get('sid_preflight_rotations')} 次",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     job.push_log("INFO", "正在规划代理…")
     try:
         plan, pmeta = _build_register_proxy_plan(p, job.count)

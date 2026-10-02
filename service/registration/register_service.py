@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import random
+import re
 import secrets
 import string
 import time
@@ -39,7 +40,21 @@ from service.resource.proxy.proxy_utils import (
     parse_proxy_pool,
     preflight_proxy,
     probe_exit_stability,
+    random_sid,
 )
+
+
+def mask_proxy(proxy: Optional[str]) -> str:
+    """日志脱敏：host:port:user:pass → host:port:user:***。"""
+    if not proxy:
+        return ""
+    try:
+        from service.resource.proxy.proxy_pool import mask_template
+
+        return mask_template(proxy)
+    except Exception:  # noqa: BLE001
+        m = re.match(r"^([^:]+):(\d+):([^:]+):", proxy)
+        return f"{m.group(1)}:{m.group(2)}:{m.group(3)}:***" if m else proxy[:48]
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -419,6 +434,43 @@ def _pick_available_email(
     raise RuntimeError(f"无法找到可用邮箱（已试 {len(tried)} 个纯字母前缀）")
 
 
+def _env_int(name: str, default: int, lo: int, hi: int) -> int:
+    try:
+        return max(lo, min(int((os.environ.get(name) or "").strip() or default), hi))
+    except (TypeError, ValueError):
+        return default
+
+
+def _preflight_with_sid_rotation(
+    proxy: Optional[str],
+    *,
+    timeout: int,
+    max_rotations: int,
+) -> tuple[bool, str]:
+    """带 {sid} 的代理预检失败时轮换 sid 重试。
+
+    同一 sticky 会话可能撞上坏出口（代理商单 IP 抖动/被拉黑），
+    轮换 sid 换新会话即可恢复。max_rotations=0 表示失败即弃（旧行为）。
+    返回 (ok, 最终代理串或说明)。
+    """
+    template = proxy or ""
+    p = template
+    for round_no in range(max(1, max_rotations + 1)):
+        ok, info = preflight_proxy(p, timeout=timeout)
+        if ok:
+            return True, p
+        if round_no >= max_rotations or "{sid}" not in template:
+            return False, info
+        new_sid = random_sid()
+        p = template.replace("{sid}", new_sid)
+        logger.warning(
+            "代理预检失败，轮换 sid 重试（%s/%s）: 新 sid=%s → %s",
+            round_no + 1, max_rotations, new_sid, info,
+        )
+        time.sleep(0.5)
+    return False, "unreachable"
+
+
 def register_one(
     *,
     email_prefix: Optional[str] = None,
@@ -431,8 +483,13 @@ def register_one(
     fetch_mail_token: bool = False,
     email_format: str = "alpha",
 ) -> RegisterResult:
+    from service.resource.proxy.proxy_pool import apply_runtime_env
+
+    apply_runtime_env()  # CLI / 引擎线程内同步池设置（已设的环境变量优先）
     explicit_proxy = proxy or os.environ.get("HTTP_PROXY") or None
     retries = max(1, int((os.environ.get("REG_PROXY_RETRIES") or "3").strip() or "3"))
+    preflight_timeout = _env_int("REG_PREFLIGHT_TIMEOUT", 15, 3, 120)
+    sid_rotations = _env_int("REG_SID_ROTATIONS", 0, 0, 10)
 
     tmpl = (proxy_template or explicit_proxy or "").strip()
     if has_sid_template(tmpl):
@@ -447,16 +504,19 @@ def register_one(
     last_exc: Optional[Exception] = None
     last_err = ""
     for idx, p in enumerate(attempt_proxies, start=1):
-        ok, info = preflight_proxy(p)
+        ok, pf = _preflight_with_sid_rotation(
+            p, timeout=preflight_timeout, max_rotations=sid_rotations,
+        )
         if not ok:
-            logger.error("代理预检失败，跳过（%s/%s）: %s", idx, len(attempt_proxies), info)
-            last_err = info
+            logger.error("代理预检失败，跳过（%s/%s）: %s", idx, len(attempt_proxies), pf)
+            last_err = pf
             continue
-        logger.info("代理预检通过（%s/%s）: %s [%s]", idx, len(attempt_proxies), p or "(直连)", info)
+        p = pf
+        logger.info("代理预检通过（%s/%s）: %s", idx, len(attempt_proxies), mask_proxy(p) or "(直连)")
         # 出口稳定性：轮换代理会让注册流程的几十条连接落在不同国家，
         # PX 在 A 国签发 _px3、verify 从 B 国提交 → 必然 AADSTS7005106 riskBlock。
         if p and os.environ.get("OUTLOOK_ALLOW_ROTATING_PROXY", "").strip() != "1":
-            sticky, sticky_info, _ = probe_exit_stability(p)
+            sticky, sticky_info, _ = probe_exit_stability(p, timeout=preflight_timeout)
             if not sticky:
                 logger.error(
                     "代理出口不稳定，跳过（%s/%s）: %s\n"

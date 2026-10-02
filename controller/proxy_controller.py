@@ -185,6 +185,9 @@ def update_proxy_pool_settings(req: dto.ProxyPoolSettingsRequest) -> JSONRespons
         strategy=req.strategy,
         require_healthy=req.require_healthy,
         sticky_per_account=req.sticky_per_account,
+        proxy_type=req.proxy_type,
+        preflight_timeout=req.preflight_timeout,
+        sid_preflight_rotations=req.sid_preflight_rotations,
     )
     return JSONResponse({"ok": True, "settings": settings})
 

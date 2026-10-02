@@ -70,6 +70,9 @@ class ProxyPoolSettingsRequest(BaseModel):
     strategy: Optional[str] = None
     require_healthy: Optional[bool] = None
     sticky_per_account: Optional[bool] = None
+    proxy_type: Optional[str] = None  # ""=自动（默认 http）| http | socks5
+    preflight_timeout: Optional[int] = None  # 预检超时（秒），3–120
+    sid_preflight_rotations: Optional[int] = None  # 含 {sid} 预检失败时最多轮换 sid 次数，0–10
 
 
 

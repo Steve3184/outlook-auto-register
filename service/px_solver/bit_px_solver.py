@@ -29,24 +29,29 @@ def _bit(path: str, body: dict, timeout: int = 30) -> dict:
 
 
 def _parse(proxy: str):
-    """兼容 http://user:pass@host:port 与 host:port:user:pass 两种格式。"""
+    """兼容 http(s)/socks5://user:pass@host:port 与 host:port:user:pass 两种格式。
+
+    返回 (host, port, user, pwd, scheme)，scheme 供 proxyType 判定。
+    """
     proxy = (proxy or "").strip()
     if "://" in proxy:
         from urllib.parse import urlparse
         u = urlparse(proxy)
-        return u.hostname or "", str(u.port or ""), u.username or "", u.password or ""
+        return u.hostname or "", str(u.port or ""), u.username or "", u.password or "", (u.scheme or "http").lower()
     a = proxy.split(":")
-    return a[0], a[1], a[2], ":".join(a[3:])
+    from service.resource.proxy.proxy_utils import scheme_from_env
+    return a[0], a[1], a[2], ":".join(a[3:]), scheme_from_env()
 
 
 def ensure_profile_for(proxy: str) -> str:
     """为该 proxy 复用/创建 profile，并把代理更新为该 proxy（保证同 IP）。"""
-    host, port, user, pwd = _parse(proxy)
+    host, port, user, pwd, scheme = _parse(proxy)
     with _lock:
         pid = os.environ.get("BIT_PROFILE_ID", "").strip() or _profile_cache.get("pid", "")
         body = {
             "name": "px-solver", "remark": "px",
-            "proxyMethod": 2, "proxyType": "http",
+            "proxyMethod": 2,
+            "proxyType": "socks5" if scheme.startswith("socks") else "http",
             "host": host, "port": port, "proxyUserName": user, "proxyPassword": pwd,
             "browserFingerPrint": {
                 "coreVersion": "124", "ostype": "PC", "os": "Win32", "version": "124",

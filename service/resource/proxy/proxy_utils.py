@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Optional
 from urllib.parse import urlparse
+
+# 无 scheme 时的代理类型默认值：读 OUTLOOK_PROXY_TYPE（http/socks5），
+# 由代理池「池设置 → 代理类型」写入；留空/auto 时回落 http（历史行为）。
+_PROXY_TYPE_ENV = "OUTLOOK_PROXY_TYPE"
+
+
+def scheme_from_env(default: str = "http") -> str:
+    t = (os.environ.get(_PROXY_TYPE_ENV) or "").strip().lower()
+    return t if t in ("http", "https", "socks5", "socks4", "socks4a") else default
 
 
 @dataclass
@@ -27,12 +37,12 @@ def parse_proxy(proxy: Optional[str]) -> Optional[ProxyConfig]:
     m = re.match(r"^([^:]+):(\d+):([^:]+):(.+)$", proxy)
     if m and "://" not in proxy:
         host, port, user, pwd = m.groups()
-        scheme = "http"
+        scheme = scheme_from_env()
         url = f"{scheme}://{user}:{pwd}@{host}:{port}"
         return ProxyConfig(url=url, scheme=scheme, host=host, port=int(port), username=user, password=pwd)
 
     if "://" not in proxy:
-        proxy = f"http://{proxy}"
+        proxy = f"{scheme_from_env()}://{proxy}"
 
     parsed = urlparse(proxy)
     scheme = parsed.scheme or "http"
@@ -93,10 +103,15 @@ def preflight_proxy(proxy: Optional[str], *, timeout: int = 15) -> tuple[bool, s
                     ip = str(r.json().get("ip", "") or "")
                 except Exception:
                     ip = ""
-            return True, f"出口={ip or 'ok'} via {cfg.host}:{cfg.port}"
+            return True, f"出口={ip or 'ok'} via {cfg.host}:{cfg.port} ({cfg.scheme})"
         except Exception as exc:  # noqa: BLE001
+            if cfg.scheme.startswith("socks") and isinstance(
+                exc, (requests.exceptions.InvalidSchema, requests.exceptions.MissingSchema)
+            ):
+                last = "SOCKS 代理缺 PySocks（pip install 'requests[socks]'），requests 无法走 socks5://"
+                continue
             last = repr(exc)[:160]
-    return False, f"代理不可用 {cfg.host}:{cfg.port} user={cfg.username} → {last}"
+    return False, f"代理不可用 {cfg.host}:{cfg.port} ({cfg.scheme}) user={cfg.username} → {last}"
 
 
 def _probe_exit_once(proxy_url: str, *, timeout: int) -> tuple[str, str]:

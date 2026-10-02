@@ -97,7 +97,11 @@ SWIFTSHADER_ARGS = [
 
 
 def _parse_proxy(proxy: str):
-    """兼容 http://user:pass@host:port 与 host:port:user:pass 两种格式 → playwright proxy dict。"""
+    """兼容 http(s)://socks5://user:pass@host:port 与 host:port:user:pass 两种格式 → playwright proxy dict。
+
+    无 scheme 的 host:port:user:pass 按代理池「代理类型」（OUTLOOK_PROXY_TYPE）解析，
+    默认 http。
+    """
     proxy = (proxy or "").strip()
     if not proxy:
         return None
@@ -105,10 +109,13 @@ def _parse_proxy(proxy: str):
         from urllib.parse import urlparse
         u = urlparse(proxy)
         host, port, user, pwd = u.hostname or "", u.port or 0, u.username or "", u.password or ""
+        scheme = (u.scheme or "http").lower()
     else:
         a = proxy.split(":")
         host, port, user, pwd = a[0], a[1], (a[2] if len(a) > 2 else ""), (":".join(a[3:]) if len(a) > 3 else "")
-    d = {"server": f"http://{host}:{port}"}
+        from service.resource.proxy.proxy_utils import scheme_from_env
+        scheme = scheme_from_env()
+    d = {"server": f"{scheme}://{host}:{port}"}
     if user:
         d["username"] = user
     if pwd:

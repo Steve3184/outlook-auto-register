@@ -69,7 +69,7 @@ def _ezcaptcha_proxy_fields(ctx: dict[str, Any]) -> dict[str, Any]:
     if not cfg:
         return {}
     return {
-        "proxyType": "http",
+        "proxyType": "socks5" if cfg.scheme.startswith("socks") else "http",
         "proxyAddress": cfg.host,
         "proxyPort": cfg.port,
         "proxyLogin": cfg.username or "",
@@ -163,6 +163,8 @@ def build_captcha_run_payload_official(ctx: dict[str, Any]) -> dict[str, Any]:
             "port": cfg.port,
             "login": cfg.username or "",
             "password": cfg.password or "",
+            # captcha.run 需显式协议；socks5/http 由代理池「代理类型」决定
+            "proxyType": "socks5" if cfg.scheme.startswith("socks") else "http",
         })
     dev = _env("CAPTCHA_RUN_DEVELOPER_ID") or CAPTCHA_RUN_DEVELOPER_ID
     if dev and _env_bool("CAPTCHA_RUN_INCLUDE_DEVELOPER", True):
@@ -187,7 +189,7 @@ def _captcha_run_include_proxy(phase: str) -> bool:
 
 def _strip_captcha_run_proxy(payload: dict[str, Any]) -> dict[str, Any]:
     out = dict(payload)
-    for key in ("host", "login", "password", "port", "proxy"):
+    for key in ("host", "login", "password", "port", "proxy", "proxyType"):
         out.pop(key, None)
     return out
 

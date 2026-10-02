@@ -26,7 +26,66 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "strategy": "round_robin",  # round_robin | least_used | random
     "require_healthy": False,
     "sticky_per_account": True,
+    "proxy_type": "",  # ""=自动（默认 http）| http | socks5；写入 OUTLOOK_PROXY_TYPE
+    "preflight_timeout": 15,  # 预检/出口稳定性探测超时（秒）→ REG_PREFLIGHT_TIMEOUT
+    "sid_preflight_rotations": 3,  # {sid} 预检失败时允许的最多轮换 sid 次数 → REG_SID_ROTATIONS
 }
+
+# 池设置 → 进程环境变量（register_one / preflight 读取）
+_RUNTIME_ENV_KEYS = {
+    "proxy_type": "OUTLOOK_PROXY_TYPE",
+    "preflight_timeout": "REG_PREFLIGHT_TIMEOUT",
+    "sid_preflight_rotations": "REG_SID_ROTATIONS",
+}
+
+
+def apply_runtime_env(
+    settings: Optional[dict[str, Any]] = None,
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    """把「池设置」同步到进程环境变量，供 register_one / preflight 读取。
+
+    - proxy_type → OUTLOOK_PROXY_TYPE（""/auto/http/socks5）
+    - preflight_timeout → REG_PREFLIGHT_TIMEOUT（3–120 秒）
+    - sid_preflight_rotations → REG_SID_ROTATIONS（0–10 次）
+
+    force=True（Web 保存/批次启动）时以库内设置覆盖环境变量；
+    否则仅补齐未设置的环境变量（CLI 显式 export 优先）。
+    返回当前生效值。
+    """
+    if settings is None:
+        with _lock:
+            conn = _with_db()
+            try:
+                settings = _get_settings(conn)
+            finally:
+                conn.close()
+
+    def _to_int(val: Any, default: int, lo: int, hi: int) -> int:
+        try:
+            return max(lo, min(int(val), hi))
+        except (TypeError, ValueError):
+            return default
+
+    pt = str(settings.get("proxy_type") or "").strip().lower()
+    if pt in ("", "auto"):
+        pt = ""  # auto → 空 = 无 scheme 走 http（历史行为）
+    elif pt not in ("http", "socks5"):
+        pt = ""
+    if force or not os.environ.get("OUTLOOK_PROXY_TYPE"):
+        os.environ["OUTLOOK_PROXY_TYPE"] = pt
+    timeout = _to_int(settings.get("preflight_timeout"), 15, 3, 120)
+    if force or not os.environ.get("REG_PREFLIGHT_TIMEOUT"):
+        os.environ["REG_PREFLIGHT_TIMEOUT"] = str(timeout)
+    rotations = _to_int(settings.get("sid_preflight_rotations"), 0, 0, 10)
+    if force or not os.environ.get("REG_SID_ROTATIONS"):
+        os.environ["REG_SID_ROTATIONS"] = str(rotations)
+    return {
+        "proxy_type": os.environ.get("OUTLOOK_PROXY_TYPE", "") or "auto",
+        "preflight_timeout": _to_int(os.environ.get("REG_PREFLIGHT_TIMEOUT"), 15, 3, 120),
+        "sid_preflight_rotations": _to_int(os.environ.get("REG_SID_ROTATIONS"), 0, 0, 10),
+    }
 
 
 def _now_iso() -> str:
@@ -764,17 +823,31 @@ def update_settings(**fields: Any) -> dict[str, Any]:
         conn = _with_db()
         try:
             settings = _get_settings(conn)
-            for k in ("strategy", "require_healthy", "sticky_per_account"):
+            for k in (
+                "strategy", "require_healthy", "sticky_per_account",
+                "proxy_type", "preflight_timeout", "sid_preflight_rotations",
+            ):
                 if k in fields and fields[k] is not None:
                     settings[k] = fields[k]
             _set_settings(conn, settings)
             conn.commit()
-            return dict(settings)
         finally:
             conn.close()
+    return apply_runtime_env(settings, force=True)
 
 
-def check_proxies(proxy_ids: Optional[list[str]] = None, *, timeout: int = 15) -> list[dict[str, Any]]:
+def check_proxies(
+    proxy_ids: Optional[list[str]] = None,
+    *,
+    timeout: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    # timeout 未显式指定时用池设置「预检超时」（REG_PREFLIGHT_TIMEOUT，默认 15s）
+    if timeout is None:
+        try:
+            timeout = int((os.environ.get("REG_PREFLIGHT_TIMEOUT") or "").strip() or 15)
+        except ValueError:
+            timeout = 15
+    timeout = max(3, min(int(timeout), 120))
     with _lock:
         conn = _with_db()
         try:

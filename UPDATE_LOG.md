@@ -99,3 +99,30 @@ docker-compose up -d
 - WebUI 密码验证使用内存存储 session，重启后需要重新登录
 - 自定义邮箱格式模板建议长度在 10-15 个字符之间
 - GitHub Actions 自动构建需要在仓库设置中启用 Packages 权限
+
+## 2026-10-02 代理设置增强
+
+### 1. 代理类型（HTTP / SOCKS5）
+
+「代理池 → 池设置」新增 **代理类型**：
+
+- `自动（默认 http）`：无 scheme 的 `host:port:user:pass` 按 HTTP 解析（与旧版一致）
+- `HTTP / HTTPS`、`SOCKS5`：写入 SQLite `proxy_settings.proxy_type`，批次启动时注入
+  `OUTLOOK_PROXY_TYPE`，全链路生效：
+  - `requests` 预检 / 出口探测 / 注册 HTTP 会话（SOCKS5 需 `pip install "requests[socks]"`）
+  - captcha.run payload `proxyType` 字段（http/socks5）
+  - EzCaptcha `proxyType` 字段
+  - 本地 SwiftShader（Playwright `server=scheme://host:port`）
+  - 比特浏览器 `proxyType`（http/socks5）
+
+带显式 scheme 的代理串（如 `socks5://user:pass@host:port`）始终以 scheme 为准。
+
+### 2. 含 {sid} 代理的预检规则
+
+池设置新增两项，启动批次时注入环境变量：
+
+- **预检超时（秒）**（3–120，默认 15）→ `REG_PREFLIGHT_TIMEOUT`：
+  单次预检 / 出口稳定性探测的 HTTP 超时；代理池页「全部预检」同样读取。
+- **sid 轮换上限（次）**（0–10，默认 3）→ `REG_SID_ROTATIONS`：
+  含 `{sid}` 的代理预检失败时自动换新 sid 重试；0 = 失败即弃（旧行为）。
+  不含 `{sid}` 的代理不受影响。

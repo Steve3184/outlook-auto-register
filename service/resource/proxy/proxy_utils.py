@@ -148,6 +148,11 @@ def probe_exit_stability(
 
     返回 ``(sticky, 说明, [(ip, country), ...])``。
     sticky=False 表示多次探测拿到不同出口 IP。
+
+    判定标准：要求**每个样本的出口都不同**才判为「每请求轮换」；
+    若多数样本出口相同（如 A-A-B），视为一次 sticky 会话跨过了轮换边界
+    （ttl 到期 / 代理商抖动），仍按 sticky 处理——注册期间的单号会话
+    短于探测窗口，跨边界概率极低。
     """
     cfg = parse_proxy(proxy)
     if not cfg:
@@ -170,6 +175,20 @@ def probe_exit_stability(
 
     if len(ips) <= 1:
         return True, f"出口稳定 {trail}", seen
+
+    counts: dict[str, int] = {}
+    for ip, _ in seen:
+        if ip:
+            counts[ip] = counts.get(ip, 0) + 1
+    majority = max(counts.values()) if counts else 0
+    total = sum(counts.values())
+
+    if total >= 2 and majority * 2 > total:
+        detail = (
+            f"出口基本稳定（多数 {majority}/{total} 同一 IP，"
+            f"疑似跨会话轮换边界）: {trail}"
+        )
+        return True, detail, seen
 
     detail = f"每请求换出口（{len(ips)} 个 IP / {len(countries)} 个国家）: {trail}"
     return False, detail, seen

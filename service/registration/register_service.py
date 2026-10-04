@@ -520,7 +520,8 @@ def register_one(
             if not sticky:
                 logger.error(
                     "代理出口不稳定，跳过（%s/%s）: %s\n"
-                    "  注册需要 sticky（会话保持）代理。请向代理商索取 sticky 会话参数"
+                    "  注册需要 sticky（会话保持）代理：3 次探测出口各不相同，"
+                    "该代理为每请求轮换。请向代理商索取 sticky 会话参数"
                     "（常见形式 user-sessid-xxx / sid_xxx_time_10 / 专用 sticky 端口），"
                     "或设 OUTLOOK_ALLOW_ROTATING_PROXY=1 强行继续（几乎必失败）。",
                     idx, len(attempt_proxies), sticky_info,

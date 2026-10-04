@@ -51,8 +51,9 @@ def revoke_token(token: str) -> None:
 class AuthMiddleware(BaseHTTPMiddleware):
     """WebUI 认证中间件"""
 
-    # 无需认证的路径
+    # 无需认证的路径（"/" 为静态页面壳，不含数据；数据接口均需登录）
     EXEMPT_PATHS = {
+        "/",
         "/api/ping",
         "/api/health",
         "/api/auth/login",
@@ -68,12 +69,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.EXEMPT_PATHS:
             return await call_next(request)
 
-        # 检查 Authorization header
+        # 检查 Authorization header；EventSource 无法带 header，兼容 ?token= 查询参数
+        token: Optional[str] = None
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
-            if verify_token(token):
-                return await call_next(request)
+        if not token:
+            token = request.query_params.get("token")
+        if verify_token(token):
+            return await call_next(request)
 
         # 认证失败
         return JSONResponse(

@@ -1028,6 +1028,20 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="dialog-backdrop" id="loginGate" style="display:none;">
+  <div class="dialog-panel-sm" role="dialog" aria-modal="true">
+    <h3>登录控制台</h3>
+    <label class="field">
+      <span>访问密码</span>
+      <input type="password" id="loginPassword" placeholder="WEBUI_PASSWORD" autocomplete="current-password" />
+    </label>
+    <p class="hint" id="loginError" style="margin:6px 0 0;font-size:11.5px;color:var(--danger);display:none;"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn primary sm" id="loginBtn">登录</button>
+    </div>
+  </div>
+</div>
+
 <div class="dialog-backdrop" id="captchaEditModal" style="display:none;">
   <div class="dialog-panel-sm" role="dialog" aria-modal="true">
     <h3 id="captchaModalTitle">编辑 Provider</h3>
@@ -1292,13 +1306,68 @@ function detailRow(label, value, copyKey, wide){
     ? `<button type="button" class="icon-btn" title="复制" data-act="copy-store" data-copy-key="${copyKey}">${COPY_ICON}</button>` : '';
   return `<div class="drow${wide?' span-2':''}"><div class="dlabel">${label}</div><div class="dval" title="${escHtml(show)}">${escHtml(show)}</div>${copyBtn}</div>`;
 }
-async function api(path, opts){ const r=await fetch(path, opts); return r; }
+let AUTH_TOKEN = sessionStorage.getItem('webui_token') || '';
+function authHeaders(extra){
+  const h = Object.assign({}, extra || {});
+  if(AUTH_TOKEN) h['Authorization'] = 'Bearer ' + AUTH_TOKEN;
+  return h;
+}
+async function api(path, opts){
+  opts = opts || {};
+  opts.headers = authHeaders(opts.headers);
+  const r = await fetch(path, opts);
+  if(r.status === 401 && path !== '/api/auth/check') showLoginGate();
+  return r;
+}
 async function jpost(path, body){
-  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
-  const text=await r.text();
+  const r = await fetch(path,{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body||{})});
+  if(r.status === 401) showLoginGate();
+  const text = await r.text();
   try { return JSON.parse(text); }
   catch(e){ return {ok:false, summary:`接口 ${r.status}：${(text||'').slice(0,80)}`}; }
 }
+function showLoginGate(){
+  const gate = $('loginGate');
+  if(gate) gate.style.display = 'flex';
+}
+async function tryLogin(){
+  const pwd = $('loginPassword').value;
+  const err = $('loginError');
+  try{
+    const r = await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pwd})});
+    const j = await r.json();
+    if(r.ok && j.token){
+      AUTH_TOKEN = j.token;
+      sessionStorage.setItem('webui_token', AUTH_TOKEN);
+      $('loginGate').style.display = 'none';
+      $('loginError').style.display = 'none';
+      $('loginPassword').value = '';
+      loadConfig(); health(); loadAccounts(); loadJobs(); loadProxyPool();
+      toast('登录成功');
+    } else {
+      err.textContent = j.detail || '密码错误';
+      err.style.display = 'block';
+    }
+  }catch(e){
+    err.textContent = '登录失败: ' + e;
+    err.style.display = 'block';
+  }
+}
+$('loginBtn').onclick = tryLogin;
+$('loginPassword').addEventListener('keydown', e => { if(e.key === 'Enter') tryLogin(); });
+(async function initAuth(){
+  try{
+    const r = await fetch('/api/auth/check');
+    const j = await r.json();
+    if(!j.enabled) return;
+    if(AUTH_TOKEN){
+      const v = await fetch('/api/health',{headers:authHeaders()});
+      if(v.ok) return;
+      AUTH_TOKEN = ''; sessionStorage.removeItem('webui_token');
+    }
+    showLoginGate();
+  }catch(e){}
+})();
 
 const TITLES = {
   overview:['概览','账号与批次总览'],
@@ -1671,7 +1740,7 @@ async function stopRegister(){
 function connectSSE(id){
   if(es) es.close();
   currentJobId=id;
-  es=new EventSource('/api/jobs/'+id+'/events');
+  es=new EventSource('/api/jobs/'+id+'/events'+(AUTH_TOKEN?('?token='+encodeURIComponent(AUTH_TOKEN)):''));
   es.onmessage=(m)=>{ const ev=JSON.parse(m.data);
     if(ev.type==='snapshot'){ (ev.snapshot.accounts||[]).forEach(a=>jobAccts[a.index]=a); (ev.snapshot.logs||[]).forEach(logLine); renderSummary(ev.snapshot.batch_summary); renderProgress(); }
     else if(ev.type==='log') logLine(ev);
@@ -1948,7 +2017,7 @@ $('nextPage').onclick=()=>{ PAGE++; renderPool(); };
 $('btnExport').onclick=async()=>{ await downloadExport(SELECTED.size?selectedEmails():null); };
 async function downloadExport(emails){
   const fmt=$('exportFmt').value;
-  const r=await fetch('/api/accounts/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({emails,format:fmt})});
+  const r=await fetch('/api/accounts/export',{method:'POST',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({emails,format:fmt})});
   const blob=await r.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a');
   a.href=url; a.download='accounts_'+fmt+'.txt'; a.click(); URL.revokeObjectURL(url);
   const six=+(r.headers.get('X-Export-Six')||0), total=+(r.headers.get('X-Export-Total')||0);
@@ -2477,7 +2546,7 @@ $('proxyBody').addEventListener('click',async(e)=>{
 $('proxyBody').addEventListener('change',async(e)=>{
   const t=e.target.closest('.proxy-en-toggle');
   if(!t) return;
-  await fetch('/api/proxy-pool/'+encodeURIComponent(t.dataset.id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:t.checked})});
+  await fetch('/api/proxy-pool/'+encodeURIComponent(t.dataset.id),{method:'PUT',headers:authHeaders({'Content-Type':'application/json'}),body:JSON.stringify({enabled:t.checked})});
   loadProxyPool();
 });
 $('proxyBindBody').addEventListener('click',async(e)=>{

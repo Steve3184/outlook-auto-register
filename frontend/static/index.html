@@ -605,6 +605,13 @@
                   <label class="field" title="Microsoft 官方 Outlook/Hotmail 域名，不含 QQ/163"><span>邮箱后缀</span><select id="domain"></select></label>
                   <label class="field" title="与代理出口一致，影响注册页语言、时区与批次命名"><span>国家代码</span><select id="country"></select></label>
                   <label class="field"><span>邮箱前缀（留空随机）</span><input type="text" id="prefix" placeholder="随机" /></label>
+                  <label class="field" title="随机前缀的风格：纯字母 / 字母数字混合 / 数字密集 / 自定义模板（a=字母，1/#=数字，其他字符原样保留）"><span>邮箱格式</span><select id="emailFormat">
+                    <option value="alpha">纯字母（默认）</option>
+                    <option value="alphanum">字母数字混合</option>
+                    <option value="alphanum_dense">数字密集型</option>
+                    <option value="__custom__">自定义模板…</option>
+                  </select></label>
+                  <label class="field" id="emailFormatCustomField" style="display:none;" title="a=字母，1 或 #=数字，其他字符原样保留。示例 a1a11aaaaaaaa → x3y45zzzzzzzz"><span>格式模板</span><input type="text" id="emailFormatCustom" placeholder="如 a1a11aaaaaaaa" autocomplete="off" /></label>
                   <label class="field span-2"><span>产出格式</span><select id="tokenMode"></select></label>
                   <label class="field span-2"><span>批次名称（可选）</span><input type="text" id="batchLabel" placeholder="留空自动生成" autocomplete="off" /></label>
                 </div>
@@ -1517,6 +1524,13 @@ async function loadConfig(){
     }).join('');
     window._productModes = products;
     $('tokenMode').onchange = function(){};
+    if($('emailFormat')){
+      const syncEmailFormat=()=>{
+        const custom=$('emailFormat').value==='__custom__';
+        if($('emailFormatCustomField')) $('emailFormatCustomField').style.display=custom?'':'none';
+      };
+      $('emailFormat').onchange=syncEmailFormat; syncEmailFormat();
+    }
     renderDomainSelect(c.domains);
     renderCountrySelect(c.countries, c.default_country);
     $('count').value = '1';
@@ -1614,8 +1628,16 @@ async function startRegister(){
   localStorage.setItem('outlook_reg_captcha_provider', captchaProvider);
   localStorage.setItem('outlook_reg_proxy_selection', proxySelection);
   const batchLabel=$('batchLabel').value.trim();
+  const emailFormatSel=$('emailFormat');
+  let emailFormat=emailFormatSel?emailFormatSel.value:'alpha';
+  if(emailFormat==='__custom__'){
+    const tpl=($('emailFormatCustom')&&$('emailFormatCustom').value.trim())||'';
+    if(!tpl){ toast('请填写邮箱格式模板（a=字母，1/#=数字）'); return; }
+    emailFormat=tpl;
+  }
   const body={ count:+$('count').value||1, concurrency:+$('concurrency').value||1,
     prefix:$('prefix').value.trim()||null, domain:$('domain').value, country:$('country').value.trim()||'US',
+    email_format:emailFormat,
     captcha_provider:captchaProvider, proxy_selection:proxySelection,
     use_proxy_pool: proxySelection==='auto' || proxySelection.startsWith('provider:'),
     skip_login:$('skipLogin').checked,

@@ -136,11 +136,24 @@ def register_batch_iter(
         proxy_plan = _plan_proxies(proxy, count)
         proxy_unique = bool(proxy and has_sid_template(proxy))
 
+    # 池规划返回的 plan 是已解析串（{sid} 已填），模板含 {sid} 与否要看
+    # proxy_templates（assignments 的 template 字段），否则会误报「未含 {sid}」。
+    templates_have_sid = any(
+        has_sid_template(t)
+        for t in (proxy_templates or [])
+        if t
+    )
+    proxy_has_sid = bool(
+        proxy_unique
+        or (proxy and has_sid_template(proxy))
+        or templates_have_sid
+    )
+
     if proxy_plan is not None:
         using_pool_plan = True
-        if proxy and not proxy_unique and not any(has_sid_template(x) for x in proxy_plan if x):
+        if proxy and not proxy_unique and not templates_have_sid:
             logger.info("代理池批量：%d 条代理已按池策略分配。", count)
-    elif proxy and not has_sid_template(proxy):
+    elif proxy and not proxy_has_sid:
         logger.warning(
             "代理未含 {sid} 占位符：全批 %d 个账号将共用同一出口 IP —— 同 IP 批量注册是"
             "最强封号信号。强烈建议改用带 {sid} 的住宅/移动代理模板"
@@ -156,8 +169,8 @@ def register_batch_iter(
         "type": "start",
         "total": count,
         "concurrency": concurrency,
-        "proxy_unique": proxy_unique,
-        "proxy_has_sid": proxy_unique or bool(proxy and has_sid_template(proxy)),
+        "proxy_unique": proxy_unique or templates_have_sid,
+        "proxy_has_sid": proxy_has_sid,
         "jitter": [jmin, jmax],
     }
 

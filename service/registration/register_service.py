@@ -493,7 +493,16 @@ def register_one(
 
     tmpl = (proxy_template or explicit_proxy or "").strip()
     if has_sid_template(tmpl):
-        attempt_proxies = expand_proxy_unique(tmpl, count=retries)
+        # 模板含 {sid}：每次重试各用一条新 sticky 会话。若调用方已规划好
+        # 本号会话（explicit_proxy 为已解析、不含 {sid} 的串），第一次尝试
+        # 沿用该会话——与日志「开始注册（代理 …）」展示的 sid 一致；
+        # 后续重试再从模板展开新 sid。
+        if explicit_proxy and not has_sid_template(explicit_proxy):
+            attempt_proxies = [explicit_proxy] + expand_proxy_unique(
+                tmpl, count=retries - 1
+            ) if retries > 1 else [explicit_proxy]
+        else:
+            attempt_proxies = expand_proxy_unique(tmpl, count=retries)
     elif explicit_proxy:
         # 已解析的 sticky 会话：整号重试时仍用同串，但会新建 PX/captcha 会话
         attempt_proxies = [explicit_proxy] * retries
